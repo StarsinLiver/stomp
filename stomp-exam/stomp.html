@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat Room</title>
+    <style>
+      body {
+        font-family: 'Arial', sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f0f2f5;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+      }
+  
+      #chat-room-container {
+        background-color: #ffffff;
+        border-radius: 15px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+        width: 80%;
+        max-width: 600px;
+      }
+  
+      .chat-header {
+        background-color: #009688;
+        color: #ffffff;
+        font-weight: bold;
+        padding: 15px;
+        text-align: center;
+        border-bottom: 1px solid #00796b;
+        border-radius: 15px 15px 0 0;
+      }
+  
+      .message-container {
+        padding: 10px;
+        border-bottom: 1px solid #e0e0e0;
+      }
+  
+      .message-input-container {
+        display: flex;
+        align-items: center;
+        border-top: 1px solid #e0e0e0;
+        padding: 10px;
+      }
+  
+      .message-input {
+        flex: 1;
+        padding: 8px;
+        border-radius: 20px;
+        border: 1px solid #ccc;
+        outline: none;
+      }
+  
+      .file-upload-btn {
+        background-color: #009688;
+        color: #ffffff;
+        border: none;
+        padding: 8px 15px;
+        border-radius: 20px;
+        cursor: pointer;
+        margin-right: 10px;
+      }
+  
+      .file-upload-btn:hover {
+        background-color: #00796b;
+      }
+  
+      .send-btn {
+        background-color: #009688;
+        color: #ffffff;
+        border: none;
+        padding: 8px 15px;
+        border-radius: 20px;
+        cursor: pointer;
+      }
+  
+      .send-btn:hover {
+        background-color: #00796b;
+      }
+
+          /* 스타일은 이전과 동일합니다. */
+    #messages-container {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    
+    </style>
+  </head>
+  <body>
+    <div id="chat-room-container">
+      <div class="chat-header">Chat Room</div>
+
+      <div id="messages-container">
+        <!-- 채팅 메시지들이 여기에 표시됩니다. -->
+      </div>
+  
+      <!-- 유저 생성 -->
+      <div id="chat-user">
+        <input type="text" id="userName" class="user-input" placeholder="Enter your username..." />
+        <button onclick="setUser()" class="user-btn">Create User</button>
+      </div>
+  
+      <!-- 메시지 입력란과 파일 업로드 버튼 -->
+      <div class="message-input-container">
+        <input type="text" id="messageInput" class="message-input" placeholder="Type your message..." />
+        <input type="file" id="fileInput" />
+        <label for="fileInput" class="file-upload-btn">Upload</label>
+        <button onclick="sendMessage()" class="send-btn">Send</button>
+      </div>
+    </div>
+  
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.2/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script>
+      let uid = 0;
+      let userName = "";
+      let room = 39;
+
+      // 유저 생성
+      const setUser = () => {
+        var userName = document.querySelector("#userName");
+        console.log("Creating user...");
+        let data = {
+          name: userName.value,
+          roomId: room,
+        };
+
+        $.ajax({
+          url: "http://localhost:8080/api/chat-user",
+          type: "POST",
+          data: JSON.stringify(data),
+          contentType: "application/json; charset=utf-8",
+          async: true,
+          success: function (response) {
+            console.log("User created successfully");
+            console.log(response);
+            uid = response.uid;
+            userName = response.userName;
+          },
+          error: function (xhr, status, error) {
+            console.error("Error creating user:", error);
+          },
+        });
+      };
+
+      // 방 생성
+      const setRoom = () => {
+        var roomName = document.querySelector("#roomName");
+        console.log("Creating room...");
+        let data = {
+          roomName: roomName.value,
+        };
+
+        $.ajax({
+          url: "http://localhost:8080/api/chat-room",
+          type: "POST",
+          data: JSON.stringify(data),
+          contentType: "application/json; charset=utf-8",
+          async: true,
+          success: function (response) {
+            console.log("Room created successfully");
+            console.log(response);
+            room = response.roomId;
+          },
+          error: function (xhr, status, error) {
+            console.error("Error creating room:", error);
+          },
+        });
+      };
+
+      // 소켓
+      const socket = new SockJS("http://localhost:8080/ws");
+      const stompClient = Stomp.over(socket);
+
+      stompClient.connect({}, (frame) => {
+        console.log("Connected to WebSocket");
+        console.log("Session ID: " + frame.headers["user-name"]);
+
+        stompClient.subscribe(`/sub/chat/${room}`, (message) => {
+          console.log("Received message: " + message);
+          console.log("Message body: " + message.body);
+          const chatRoom = JSON.parse(message.body);
+          displayChatRoom(chatRoom);
+        });
+      });
+
+      socket.addEventListener("close", (event) => {
+        console.log("WebSocket connection closed.");
+      });
+
+      // 메시지를 보냄
+      const sendMessage = () => {
+        const messageInput = $("#messageInput").val().trim();
+        const fileInput = $("#fileInput").val();
+
+        if (messageInput === "" && fileInput === "") {
+          // 메시지와 파일 모두 입력되지 않은 경우
+          alert("Please enter a message or select a file.");
+          return;
+        }
+
+        if (fileInput !== "") {
+          // 파일이 있는 경우 파일을 전송합니다.
+          sendFile();
+        } else {
+          // 파일이 없는 경우 메시지만 전송합니다.
+          sendTextMessage();
+        }
+      };
+
+      // 일반 텍스트 메시지
+      function sendTextMessage() {
+        const messageInput = document.getElementById("messageInput");
+        const message = messageInput.value;
+
+        let data = {
+          sender: uid,
+          roomId: room,
+          content: message,
+        };
+        console.log(data);
+
+        stompClient.send(
+          "/pub/chat/sendMessage",
+          {},
+          JSON.stringify({
+            sender: uid,
+            roomId: room,
+            content: message,
+            type: "CHAT",
+          })
+        );
+        messageInput.value = "";
+      }
+
+      const sendFile = () => {
+        var sender = uid;
+        var roomId = room;
+        var content = $("#messageInput").val();
+        var type = "DATA";
+        var fileRoot = "";
+        var file = $("#fileInput")[0].files[0];
+        var timestamp = new Date().toISOString();
+
+        var formData = new FormData();
+        formData.append("sender", sender);
+        formData.append("roomId", roomId);
+        formData.append("content", content);
+        formData.append("type", type);
+        formData.append("fileRoot", fileRoot);
+        formData.append("file", file);
+        formData.append("timestamp", timestamp);
+
+        $.ajax({
+          url: "http://localhost:8080/api/data",
+          type: "POST",
+          data: formData,
+          contentType: false,
+          processData: false,
+          success: function (response) {
+            console.log("Success:", response);
+          },
+          error: function (xhr, status, error) {
+            console.error("Error:", error);
+          },
+        });
+      };
+
+      // 파일 내용 삭제
+      $("#fileInput")[0].files[0] = null;
+
+      function displayChatRoom(chatRoom) {
+        const messagesContainer = document.getElementById("messages-container");
+        messagesContainer.innerHTML = "";
+        console.log("Chat room: ", chatRoom);
+        for (const message of chatRoom) {
+          const messageDiv = document.createElement("div");
+          messageDiv.classList.add("message");
+          messageDiv.innerHTML = `<div> <img src="${message.fileRoot}" style="width : 100px; height : 100px;"/> </div> <strong>${message.sender}:</strong> ${message.content}`;
+          messagesContainer.appendChild(messageDiv);
+        }
+      }
+
+
+
+    // 메시지 컨테이너 스크롤을 맨 아래로 이동하는 함수
+    function scrollMessagesToBottom() {
+      var messagesContainer = document.getElementById("messages-container");
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+      // 새로운 메시지가 도착할 때마다 스크롤을 아래로 내립니다.
+    setInterval(scrollMessagesToBottom, 100); // 매 0.1초마다 스크롤을 아래로 내립니다.
+    </script>
+  </body>
+</html>
